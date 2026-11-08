@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using Microsoft.Win32;
 
 namespace CandadoApp
 {
@@ -153,34 +154,44 @@ namespace CandadoApp
             return found.Values.OrderBy(a => a.Name).ToList();
         }
 
-        // Aplicaciones instaladas (accesos del menú Inicio) más las que están abiertas: para el buscador por nombre.
+        // Aplicaciones instaladas (accesos del menú Inicio + rutas del registro) más las abiertas: para el buscador por nombre.
         public static List<BlockedApp> InstalledAndRunning()
         {
-            Dictionary<string, BlockedApp> found = new Dictionary<string, BlockedApp>();
-            foreach (Environment.SpecialFolder folder in new[] { Environment.SpecialFolder.CommonStartMenu, Environment.SpecialFolder.StartMenu })
-            {
-                string root = Environment.GetFolderPath(folder);
-                if (root.Length == 0 || !Directory.Exists(root))
-                    continue;
-                string[] shortcuts;
-                try { shortcuts = Directory.GetFiles(root, "*.lnk", SearchOption.AllDirectories); }
-                catch { continue; }
+            Dictionary<string, BlockedApp> found = new Dictionary<string, BlockedApp>(StringComparer.OrdinalIgnoreCase);
 
-                foreach (string lnk in shortcuts)
+            object shell = CreateShell();
+            try
+            {
+                foreach (Environment.SpecialFolder folder in new[] { Environment.SpecialFolder.CommonStartMenu, Environment.SpecialFolder.StartMenu })
                 {
-                    try
+                    string root = Environment.GetFolderPath(folder);
+                    if (root.Length == 0)
+                        continue;
+                    foreach (string lnk in FindShortcuts(root))
                     {
-                        string target = ResolveShortcut(lnk);
-                        if (target == null || !target.ToLowerInvariant().EndsWith(".exe"))
-                            continue;
-                        string file = Path.GetFileName(target).ToLowerInvariant();
-                        if (file.Length == 0 || found.ContainsKey(file))
-                            continue;
-                        found[file] = new BlockedApp(target, Path.GetFileNameWithoutExtension(lnk));
+                        try
+                        {
+                            string target = ResolveShortcut(shell, lnk);
+                            if (target == null || !target.ToLowerInvariant().EndsWith(".exe") || !File.Exists(target))
+                                continue;
+                            string file = Path.GetFileName(target).ToLowerInvariant();
+                            if (file.Length == 0 || found.ContainsKey(file))
+                                continue;
+                            found[file] = new BlockedApp(target, Path.GetFileNameWithoutExtension(lnk));
+                        }
+                        catch { }
                     }
-                    catch { }
                 }
             }
+            finally
+            {
+                if (shell != null)
+                    System.Runtime.InteropServices.Marshal.ReleaseComObject(shell);
+            }
+
+            // Rutas registradas en "App Paths" (programas sin acceso directo en Inicio).
+            AddAppPaths(found, Registry.LocalMachine);
+            AddAppPaths(found, Registry.CurrentUser);
 
             foreach (BlockedApp app in RunningWithWindow())
                 if (!found.ContainsKey(app.FileName))
@@ -189,26 +200,80 @@ namespace CandadoApp
             return found.Values.OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
         }
 
-        // Resuelve el destino de un acceso directo .lnk sin dependencias externas (WScript.Shell por reflexión).
-        private static string ResolveShortcut(string lnkPath)
+        // Recorre las carpetas del menú Inicio sin abortar por una subcarpeta sin permisos.
+        private static List<string> FindShortcuts(string root)
         {
-            Type type = Type.GetTypeFromProgID("WScript.Shell");
-            if (type == null)
-                return null;
-            object shell = null;
+            List<string> result = new List<string>();
+            Stack<string> stack = new Stack<string>();
+            stack.Push(root);
+            while (stack.Count > 0)
+            {
+                string dir = stack.Pop();
+                try { result.AddRange(Directory.GetFiles(dir, "*.lnk")); }
+                catch { }
+                try { foreach (string sub in Directory.GetDirectories(dir)) stack.Push(sub); }
+                catch { }
+            }
+            return result;
+        }
+
+        private static void AddAppPaths(Dictionary<string, BlockedApp> found, RegistryKey hive)
+        {
             try
             {
-                shell = Activator.CreateInstance(type);
-                object shortcut = type.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { lnkPath });
+                using (RegistryKey key = hive.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths"))
+                {
+                    if (key == null)
+                        return;
+                    foreach (string name in key.GetSubKeyNames())
+                    {
+                        if (!name.ToLowerInvariant().EndsWith(".exe"))
+                            continue;
+                        try
+                        {
+                            using (RegistryKey sub = key.OpenSubKey(name))
+                            {
+                                string path = sub != null ? sub.GetValue(null) as string : null;
+                                if (string.IsNullOrEmpty(path))
+                                    continue;
+                                path = path.Trim('"');
+                                if (!File.Exists(path))
+                                    continue;
+                                string file = Path.GetFileName(path).ToLowerInvariant();
+                                if (file.Length == 0 || found.ContainsKey(file))
+                                    continue;
+                                found[file] = new BlockedApp(path, Path.GetFileNameWithoutExtension(path));
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private static object CreateShell()
+        {
+            try
+            {
+                Type type = Type.GetTypeFromProgID("WScript.Shell");
+                return type != null ? Activator.CreateInstance(type) : null;
+            }
+            catch { return null; }
+        }
+
+        // Resuelve el destino de un acceso directo .lnk reutilizando un único objeto WScript.Shell.
+        private static string ResolveShortcut(object shell, string lnkPath)
+        {
+            if (shell == null)
+                return null;
+            try
+            {
+                object shortcut = shell.GetType().InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { lnkPath });
                 object target = shortcut.GetType().InvokeMember("TargetPath", BindingFlags.GetProperty, null, shortcut, null);
                 return target as string;
             }
             catch { return null; }
-            finally
-            {
-                if (shell != null)
-                    System.Runtime.InteropServices.Marshal.ReleaseComObject(shell);
-            }
         }
     }
 }

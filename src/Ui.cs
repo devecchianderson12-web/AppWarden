@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
+using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 
@@ -90,6 +91,48 @@ namespace CandadoApp
             menu.Font = UiFont(10);
             menu.Padding = new Padding(6);
             menu.HandleCreated += delegate { RoundWindow(menu, false); };
+        }
+    }
+
+    // Extrae y guarda en caché el icono de cada programa (por ruta del .exe) para mostrarlo en las listas.
+    internal static class IconCache
+    {
+        private static readonly Dictionary<string, Image> cache = new Dictionary<string, Image>(StringComparer.OrdinalIgnoreCase);
+
+        public static Image Get(string path, int size)
+        {
+            if (string.IsNullOrEmpty(path))
+                return null;
+            Image image;
+            if (cache.TryGetValue(path, out image))
+                return image;
+            image = Load(path, size);
+            cache[path] = image; // se guarda también null para no reintentar
+            return image;
+        }
+
+        private static Image Load(string path, int size)
+        {
+            try
+            {
+                if (!File.Exists(path))
+                    return null;
+                using (Icon icon = Icon.ExtractAssociatedIcon(path))
+                {
+                    if (icon == null)
+                        return null;
+                    Bitmap bitmap = new Bitmap(size, size);
+                    using (Graphics g = Graphics.FromImage(bitmap))
+                    using (Bitmap source = icon.ToBitmap())
+                    {
+                        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                        g.DrawImage(source, new Rectangle(0, 0, size, size));
+                    }
+                    return bitmap;
+                }
+            }
+            catch { return null; }
         }
     }
 
@@ -401,15 +444,20 @@ namespace CandadoApp
         {
             Card card = new Card { Bounds = new Rectangle(2, y, width, 48), Radius = 12 };
 
-            Label glyph = new Label
-            {
-                Text = "",
-                Font = new Font(Theme.IconFont, 12f),
-                ForeColor = Theme.AccentLight,
-                BackColor = Color.Transparent,
-                TextAlign = ContentAlignment.MiddleCenter,
-                Bounds = new Rectangle(8, 4, 34, 40)
-            };
+            Control glyph;
+            Image ico = IconCache.Get(app.Path, 24);
+            if (ico != null)
+                glyph = new PictureBox { Image = ico, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.Transparent, Bounds = new Rectangle(10, 12, 24, 24) };
+            else
+                glyph = new Label
+                {
+                    Text = "",
+                    Font = new Font(Theme.IconFont, 12f),
+                    ForeColor = Theme.AccentLight,
+                    BackColor = Color.Transparent,
+                    TextAlign = ContentAlignment.MiddleCenter,
+                    Bounds = new Rectangle(8, 4, 34, 40)
+                };
             Label name = new Label
             {
                 Text = app.Name,
@@ -551,14 +599,29 @@ namespace CandadoApp
 
         private void DrawItem(object sender, DrawItemEventArgs e)
         {
-            if (e.Index < 0)
+            if (e.Index < 0 || e.Index >= shown.Count)
                 return;
+            BlockedApp app = shown[e.Index];
             using (SolidBrush background = new SolidBrush(Theme.Window))
                 e.Graphics.FillRectangle(background, e.Bounds);
             Theme.Prepare(e.Graphics);
             if ((e.State & DrawItemState.Selected) != 0)
                 Theme.FillRound(e.Graphics, Theme.Accent, new RectangleF(e.Bounds.X, e.Bounds.Y + 1, e.Bounds.Width, e.Bounds.Height - 2), 8);
-            TextRenderer.DrawText(e.Graphics, (string)list.Items[e.Index], list.Font, new Rectangle(e.Bounds.X + 12, e.Bounds.Y, e.Bounds.Width - 14, e.Bounds.Height),
+
+            int iconSize = 24;
+            int textLeft = e.Bounds.X + 12;
+            Image icon = IconCache.Get(app.Path, iconSize);
+            if (icon != null)
+            {
+                e.Graphics.DrawImage(icon, e.Bounds.X + 10, e.Bounds.Y + (e.Bounds.Height - iconSize) / 2, iconSize, iconSize);
+                textLeft = e.Bounds.X + 44;
+            }
+
+            string text = string.Equals(app.Name, app.FileName, StringComparison.OrdinalIgnoreCase)
+                ? app.Name
+                : app.Name + "   ·   " + app.FileName;
+            Rectangle bounds = new Rectangle(textLeft, e.Bounds.Y, e.Bounds.Right - textLeft - 10, e.Bounds.Height);
+            TextRenderer.DrawText(e.Graphics, text, list.Font, bounds,
                 Theme.Text, TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
         }
     }
