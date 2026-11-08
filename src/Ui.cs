@@ -629,11 +629,11 @@ namespace CandadoApp
     // Aviso no invasivo, abajo a la derecha, con bordes redondeados y botón "Actualizar".
     internal sealed class UpdateToast : Form
     {
-        private readonly string url;
+        private readonly UpdateInfo info;
 
-        public UpdateToast(string url)
+        public UpdateToast(UpdateInfo info)
         {
-            this.url = url;
+            this.info = info;
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             TopMost = true;
@@ -652,13 +652,49 @@ namespace CandadoApp
             Controls.Add(close);
 
             RoundButton update = new RoundButton { Text = "Actualizar", Font = Theme.UiFont(10, FontStyle.Bold), Bounds = new Rectangle(66, 74, 150, 34) };
-            update.Click += delegate
-            {
-                try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(this.url) { UseShellExecute = true }); }
-                catch { }
-                Close();
-            };
+            update.Click += delegate { StartUpdate(update); };
             Controls.Add(update);
+        }
+
+        // Descarga la versión nueva y reinicia; si no hay archivo para bajar, abre la página del release.
+        private void StartUpdate(RoundButton button)
+        {
+            if (string.IsNullOrEmpty(info.DownloadUrl))
+            {
+                OpenPage();
+                Close();
+                return;
+            }
+            button.Enabled = false;
+            button.Text = "Descargando…";
+            System.Threading.ThreadPool.QueueUserWorkItem(delegate
+            {
+                bool ok = Updater.ApplyUpdate(info);
+                try
+                {
+                    BeginInvoke(new Action(delegate
+                    {
+                        if (ok)
+                        {
+                            Application.Exit();
+                        }
+                        else
+                        {
+                            button.Enabled = true;
+                            button.Text = "Actualizar";
+                            OpenPage();
+                            Close();
+                        }
+                    }));
+                }
+                catch { }
+            });
+        }
+
+        private void OpenPage()
+        {
+            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(info.PageUrl) { UseShellExecute = true }); }
+            catch { }
         }
 
         protected override bool ShowWithoutActivation

@@ -59,6 +59,7 @@ namespace CandadoApp
         {
             watcher = new Watcher(settings);
             configForm = new ConfigForm(settings);
+            Updater.CleanupOld();
 
             ToolStripMenuItem openItem = new ToolStripMenuItem("Abrir " + Program.Name, null, delegate { OpenConfig(); });
             openItem.Font = new Font(openItem.Font, System.Drawing.FontStyle.Bold);
@@ -182,20 +183,20 @@ namespace CandadoApp
                 return;
             ThreadPool.QueueUserWorkItem(delegate
             {
-                string url = Updater.CheckForUpdate();
-                if (url == null)
+                UpdateInfo info = Updater.CheckForUpdate();
+                if (info == null)
                     return;
-                try { configForm.BeginInvoke(new Action(delegate { ShowUpdate(url); })); }
+                try { configForm.BeginInvoke(new Action(delegate { ShowUpdate(info); })); }
                 catch { }
             });
         }
 
-        private void ShowUpdate(string url)
+        private void ShowUpdate(UpdateInfo info)
         {
             if (updateShown)
                 return;
             updateShown = true;
-            new UpdateToast(url).Show();
+            new UpdateToast(info).Show();
         }
 
         private void OpenConfig()
