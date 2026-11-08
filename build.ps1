@@ -16,11 +16,11 @@ if (-not (Test-Path $csc)) { throw "No se encontro csc.exe de .NET Framework 4" 
 New-Item -ItemType Directory -Force $outputDir | Out-Null
 $output = Join-Path $outputDir "$appName.exe"
 
-# Graba el repositorio y el commit para el aviso de actualizacion.
-# En GitHub Actions GITHUB_REPOSITORY y GITHUB_SHA llegan automaticamente; en local quedan vacios (aviso desactivado).
+# Graba el repositorio y el numero de version (el run de GitHub, que siempre sube de a uno) para el aviso de actualizacion.
+# En GitHub Actions GITHUB_REPOSITORY y GITHUB_RUN_NUMBER llegan automaticamente; en local quedan vacios/0 (aviso desactivado).
 $repo = if ($env:GITHUB_REPOSITORY) { $env:GITHUB_REPOSITORY } else { '' }
-$commit = if ($env:GITHUB_SHA) { $env:GITHUB_SHA } else { '' }
-$buildInfo = "namespace CandadoApp { internal static class BuildInfo { public const string Repo = `"$repo`"; public const string Commit = `"$commit`"; } }"
+$version = if ($env:GITHUB_RUN_NUMBER) { $env:GITHUB_RUN_NUMBER } else { '0' }
+$buildInfo = "namespace CandadoApp { internal static class BuildInfo { public const string Repo = `"$repo`"; public const int Version = $version; } }"
 Set-Content (Join-Path $PSScriptRoot 'src\BuildInfo.cs') $buildInfo -Encoding UTF8
 
 & $csc /nologo /target:winexe /optimize+ /platform:anycpu "/out:$output" `

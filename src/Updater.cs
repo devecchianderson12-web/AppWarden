@@ -15,22 +15,24 @@ namespace CandadoApp
     // Avisa de versiones nuevas y, con un clic, descarga la nueva y reemplaza la vieja.
     internal static class Updater
     {
-        // El workflow pone el commit exacto en el cuerpo del release; solo avisa si NO coincide con el de esta build.
+        // Compara el número de versión del release con el de esta build; avisa SOLO si el del release es mayor.
         public static UpdateInfo CheckForUpdate()
         {
             try
             {
-                if (string.IsNullOrEmpty(BuildInfo.Repo) || string.IsNullOrEmpty(BuildInfo.Commit))
-                    return null;
+                if (string.IsNullOrEmpty(BuildInfo.Repo) || BuildInfo.Version <= 0)
+                    return null; // compilado en local, sin versión: no hay con qué comparar
 
                 string release = Get("https://api.github.com/repos/" + BuildInfo.Repo + "/releases/tags/latest");
                 if (release == null)
                     return null; // sin red, repo privado o sin release: no molestar
 
                 Match body = Regex.Match(release, "\"body\"\\s*:\\s*\"([^\"]*)\"");
-                string remote = body.Success ? body.Groups[1].Value.Trim() : "";
-                if (remote.Length == 0 || remote.Equals(BuildInfo.Commit, StringComparison.OrdinalIgnoreCase))
-                    return null; // ya es la última versión
+                int latest;
+                if (!body.Success || !int.TryParse(body.Groups[1].Value.Trim(), out latest))
+                    return null; // no pudimos leer la versión: no molestar
+                if (latest <= BuildInfo.Version)
+                    return null; // ya estamos en la última (o más nueva)
 
                 UpdateInfo info = new UpdateInfo();
                 Match asset = Regex.Match(release, "\"browser_download_url\"\\s*:\\s*\"([^\"]+\\.exe)\"");
@@ -78,16 +80,28 @@ namespace CandadoApp
             }
         }
 
-        // Borra el ejecutable viejo que dejó la actualización anterior.
+        // Borra el ejecutable viejo que dejó la actualización. Reintenta porque el proceso anterior
+        // puede tardar un instante en soltar el archivo al cerrarse.
         public static void CleanupOld()
         {
-            try
+            string old;
+            try { old = Process.GetCurrentProcess().MainModule.FileName + ".old"; }
+            catch { return; }
+
+            System.Threading.ThreadPool.QueueUserWorkItem(delegate
             {
-                string old = Process.GetCurrentProcess().MainModule.FileName + ".old";
-                if (File.Exists(old))
-                    File.Delete(old);
-            }
-            catch { }
+                for (int i = 0; i < 20; i++)
+                {
+                    try
+                    {
+                        if (!File.Exists(old))
+                            return;
+                        File.Delete(old);
+                        return;
+                    }
+                    catch { System.Threading.Thread.Sleep(500); }
+                }
+            });
         }
 
         private static string Get(string url)

@@ -29,6 +29,9 @@ namespace CandadoApp
         private readonly AppList appList = new AppList();
         private readonly Label passwordStatus = new Label();
         private readonly ToggleSwitch protectionBox = new ToggleSwitch("Protección activa");
+        private readonly Card updatePanel = new Card { Fill = Theme.Field, Radius = 14, Visible = false };
+        private readonly RoundButton updateButton = new RoundButton();
+        private UpdateInfo updateInfo;
         private Card page;
         private int rowY;
         private int navY;
@@ -82,7 +85,76 @@ namespace CandadoApp
             };
             Controls.Add(quit);
 
+            // Panel de actualización, abajo en la barra lateral (oculto hasta que haya una versión nueva).
+            updatePanel.Bounds = new Rectangle(16, ClientSize.Height - 150, SidebarWidth - 32, 78);
+            Label updateTitle = new Label
+            {
+                Text = "Actualización disponible",
+                AutoSize = false,
+                ForeColor = Theme.Text,
+                BackColor = Color.Transparent,
+                Font = Theme.UiFont(9.5f, FontStyle.Bold),
+                Bounds = new Rectangle(12, 10, SidebarWidth - 56, 20)
+            };
+            updateButton.Text = "Actualizar";
+            updateButton.Font = Theme.UiFont(10, FontStyle.Bold);
+            updateButton.Bounds = new Rectangle(12, 36, SidebarWidth - 56, 32);
+            updateButton.Click += delegate { StartUpdate(); };
+            updatePanel.Controls.Add(updateTitle);
+            updatePanel.Controls.Add(updateButton);
+            Controls.Add(updatePanel);
+            updatePanel.BringToFront();
+
             ShowPage(0);
+        }
+
+        public void ShowUpdateAvailable(UpdateInfo info)
+        {
+            updateInfo = info;
+            updateButton.Enabled = true;
+            updateButton.Text = "Actualizar";
+            updatePanel.Visible = true;
+            updatePanel.BringToFront();
+        }
+
+        private void StartUpdate()
+        {
+            if (updateInfo == null)
+                return;
+            if (string.IsNullOrEmpty(updateInfo.DownloadUrl))
+            {
+                OpenReleasePage();
+                return;
+            }
+            updateButton.Enabled = false;
+            updateButton.Text = "Descargando…";
+            System.Threading.ThreadPool.QueueUserWorkItem(delegate
+            {
+                bool ok = Updater.ApplyUpdate(updateInfo);
+                try
+                {
+                    BeginInvoke(new Action(delegate
+                    {
+                        if (ok)
+                        {
+                            Application.Exit();
+                        }
+                        else
+                        {
+                            updateButton.Enabled = true;
+                            updateButton.Text = "Actualizar";
+                            OpenReleasePage();
+                        }
+                    }));
+                }
+                catch { }
+            });
+        }
+
+        private void OpenReleasePage()
+        {
+            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(updateInfo.PageUrl) { UseShellExecute = true }); }
+            catch { }
         }
 
         protected override CreateParams CreateParams

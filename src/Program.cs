@@ -204,7 +204,8 @@ namespace CandadoApp
             if (updateShown)
                 return;
             updateShown = true;
-            new UpdateToast(info).Show();
+            configForm.ShowUpdateAvailable(info);
+            tray.ShowBalloonTip(5000, Program.Name, "Hay una actualización disponible. Abrí AppWarden para instalarla.", ToolTipIcon.Info);
         }
 
         private void OpenConfig()
