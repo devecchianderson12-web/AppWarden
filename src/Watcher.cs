@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using Microsoft.Win32;
 
 namespace CandadoApp
@@ -193,6 +194,10 @@ namespace CandadoApp
             AddAppPaths(found, Registry.LocalMachine);
             AddAppPaths(found, Registry.CurrentUser);
 
+            // Juegos instalados de Epic y Steam (no aparecen en el menú Inicio).
+            AddEpicGames(found);
+            AddSteamGames(found);
+
             foreach (BlockedApp app in RunningWithWindow())
                 if (!found.ContainsKey(app.FileName))
                     found[app.FileName] = app;
@@ -250,6 +255,165 @@ namespace CandadoApp
                 }
             }
             catch { }
+        }
+
+        // Juegos de Epic: cada manifiesto .item trae la carpeta, el ejecutable y el nombre visible.
+        private static void AddEpicGames(Dictionary<string, BlockedApp> found)
+        {
+            try
+            {
+                string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                    @"Epic\EpicGamesLauncher\Data\Manifests");
+                if (!Directory.Exists(dir))
+                    return;
+                foreach (string item in Directory.GetFiles(dir, "*.item"))
+                {
+                    try
+                    {
+                        string json = File.ReadAllText(item);
+                        string install = JsonField(json, "InstallLocation");
+                        string exe = JsonField(json, "LaunchExecutable");
+                        string name = JsonField(json, "DisplayName");
+                        if (install.Length == 0 || exe.Length == 0)
+                            continue;
+                        string path = Path.Combine(install, exe);
+                        if (!File.Exists(path))
+                            continue;
+                        string file = Path.GetFileName(path).ToLowerInvariant();
+                        if (file.Length == 0 || found.ContainsKey(file))
+                            continue;
+                        found[file] = new BlockedApp(path, name.Length > 0 ? name : Path.GetFileNameWithoutExtension(path));
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+        }
+
+        // Juegos de Steam: se recorren las bibliotecas y se listan los .exe de cada juego.
+        private static void AddSteamGames(Dictionary<string, BlockedApp> found)
+        {
+            try
+            {
+                string steam = SteamPath();
+                if (steam.Length == 0)
+                    return;
+
+                List<string> libraries = new List<string> { steam };
+                string vdf = Path.Combine(steam, @"steamapps\libraryfolders.vdf");
+                if (File.Exists(vdf))
+                {
+                    foreach (Match m in Regex.Matches(File.ReadAllText(vdf), "\"path\"\\s*\"([^\"]+)\""))
+                    {
+                        string p = m.Groups[1].Value.Replace("\\\\", "\\");
+                        if (Directory.Exists(p))
+                            libraries.Add(p);
+                    }
+                }
+
+                foreach (string library in libraries.Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    string common = Path.Combine(library, @"steamapps\common");
+                    if (!Directory.Exists(common))
+                        continue;
+                    string[] games;
+                    try { games = Directory.GetDirectories(common); }
+                    catch { continue; }
+
+                    foreach (string game in games)
+                    {
+                        string gameName = Path.GetFileName(game);
+                        string norm = Normalize(gameName);
+
+                        List<string> candidates = ShallowExes(game)
+                            .Where(e => !IsHelperExe(Path.GetFileName(e).ToLowerInvariant())).ToList();
+
+                        // Preferir el .exe cuyo nombre se parece al del juego; si no hay, los de la carpeta raíz.
+                        List<string> matches = candidates.Where(e =>
+                        {
+                            string n = Normalize(Path.GetFileNameWithoutExtension(e));
+                            return n.Length > 2 && (norm.Contains(n) || n.Contains(norm));
+                        }).ToList();
+
+                        List<string> chosen = matches.Count > 0
+                            ? matches
+                            : candidates.Where(e => string.Equals(Path.GetDirectoryName(e), game, StringComparison.OrdinalIgnoreCase)).ToList();
+
+                        foreach (string exe in chosen)
+                        {
+                            string file = Path.GetFileName(exe).ToLowerInvariant();
+                            if (found.ContainsKey(file))
+                                continue;
+                            found[file] = new BlockedApp(exe, gameName);
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        // .exe en la carpeta del juego y en sus subcarpetas directas (muchos juegos lo tienen en \bin, \Binaries, etc.).
+        private static IEnumerable<string> ShallowExes(string root)
+        {
+            List<string> list = new List<string>();
+            try { list.AddRange(Directory.GetFiles(root, "*.exe")); }
+            catch { }
+            try
+            {
+                foreach (string sub in Directory.GetDirectories(root))
+                {
+                    try { list.AddRange(Directory.GetFiles(sub, "*.exe")); }
+                    catch { }
+                }
+            }
+            catch { }
+            return list;
+        }
+
+        private static string Normalize(string text)
+        {
+            char[] chars = text.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray();
+            return new string(chars);
+        }
+
+        private static bool IsHelperExe(string file)
+        {
+            return file.Contains("unins") || file.Contains("crash") || file.Contains("redist")
+                || file.Contains("setup") || file.Contains("vcredist") || file.Contains("dxsetup")
+                || file.Contains("install") || file.Contains("launcher_helper") || file.Contains("notification_helper");
+        }
+
+        private static string SteamPath()
+        {
+            try
+            {
+                using (RegistryKey k = Registry.CurrentUser.OpenSubKey(@"Software\Valve\Steam"))
+                {
+                    string p = k != null ? k.GetValue("SteamPath") as string : null;
+                    if (!string.IsNullOrEmpty(p) && Directory.Exists(p))
+                        return p;
+                }
+            }
+            catch { }
+            try
+            {
+                using (RegistryKey k = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\WOW6432Node\Valve\Steam"))
+                {
+                    string p = k != null ? k.GetValue("InstallPath") as string : null;
+                    if (!string.IsNullOrEmpty(p) && Directory.Exists(p))
+                        return p;
+                }
+            }
+            catch { }
+            return "";
+        }
+
+        private static string JsonField(string json, string key)
+        {
+            Match m = Regex.Match(json, "\"" + key + "\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
+            if (!m.Success)
+                return "";
+            return m.Groups[1].Value.Replace("\\\\", "\\").Replace("\\/", "/");
         }
 
         private static object CreateShell()

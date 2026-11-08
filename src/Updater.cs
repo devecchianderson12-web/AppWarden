@@ -1,24 +1,19 @@
 using System;
-using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Text.RegularExpressions;
 
 namespace CandadoApp
 {
-    // Consulta el release "latest" del repositorio y avisa si se publicó uno más nuevo que esta compilación.
+    // Consulta el release "latest" y avisa si su commit es distinto al de esta compilación (hay versión nueva).
     internal static class Updater
     {
         public static string CheckForUpdate()
         {
             try
             {
-                if (string.IsNullOrEmpty(BuildInfo.Repo) || string.IsNullOrEmpty(BuildInfo.BuildTimeUtc))
+                if (string.IsNullOrEmpty(BuildInfo.Repo) || string.IsNullOrEmpty(BuildInfo.Commit))
                     return null; // compilado en local, sin repositorio: no hay a quién consultar
-
-                DateTime built = ParseUtc(BuildInfo.BuildTimeUtc);
-                if (built == DateTime.MinValue)
-                    return null;
 
                 ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
                 HttpWebRequest request = (HttpWebRequest)WebRequest.Create("https://api.github.com/repos/" + BuildInfo.Repo + "/releases/tags/latest");
@@ -31,12 +26,10 @@ namespace CandadoApp
                 using (StreamReader reader = new StreamReader(response.GetResponseStream()))
                     json = reader.ReadToEnd();
 
-                Match published = Regex.Match(json, "\"published_at\"\\s*:\\s*\"([^\"]+)\"");
-                if (!published.Success)
-                    return null;
-
-                DateTime releaseTime = ParseUtc(published.Groups[1].Value);
-                if (releaseTime <= built.AddSeconds(120)) // margen: el release propio se publica segundos después de compilar
+                // El workflow pone el commit del release en el cuerpo; si no coincide con el nuestro, hay actualización.
+                Match body = Regex.Match(json, "\"body\"\\s*:\\s*\"([^\"]*)\"");
+                string remote = body.Success ? body.Groups[1].Value.Trim() : "";
+                if (remote.Length == 0 || remote.Equals(BuildInfo.Commit, StringComparison.OrdinalIgnoreCase))
                     return null;
 
                 Match html = Regex.Match(json, "\"html_url\"\\s*:\\s*\"([^\"]+)\"");
@@ -44,15 +37,6 @@ namespace CandadoApp
             }
             catch (WebException) { return null; }
             catch (IOException) { return null; }
-            catch (FormatException) { return null; }
-        }
-
-        private static DateTime ParseUtc(string value)
-        {
-            DateTime parsed;
-            if (DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out parsed))
-                return parsed;
-            return DateTime.MinValue;
         }
     }
 }

@@ -49,7 +49,7 @@ namespace CandadoApp
         private readonly ContextMenuStrip menu = new ContextMenuStrip();
         private readonly ToolStripMenuItem protectionItem = new ToolStripMenuItem();
         private readonly System.Windows.Forms.Timer poll = new System.Windows.Forms.Timer { Interval = 400 };
-        private readonly System.Windows.Forms.Timer updateTimer = new System.Windows.Forms.Timer { Interval = 6 * 60 * 60 * 1000 };
+        private readonly System.Windows.Forms.Timer updateTimer = new System.Windows.Forms.Timer { Interval = 15 * 60 * 1000 };
         private readonly Queue<BlockedHit> queue = new Queue<BlockedHit>();
         private readonly RegisteredWaitHandle openWait;
         private LockSession lockSession;
