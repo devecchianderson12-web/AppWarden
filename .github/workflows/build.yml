@@ -1,26 +1,32 @@
-$ErrorActionPreference = 'Stop'
-Set-Location $PSScriptRoot
+name: build
 
-$yml = Get-Content '.github/workflows/build.yml' -Raw
-function Get-YmlValue([string] $name) {
-    $match = [regex]::Match($yml, "(?m)^\s+$name\s*:\s*(\S+)\s*$")
-    if (-not $match.Success) { throw "Falta $name en build.yml" }
-    $match.Groups[1].Value
-}
-$appName = Get-YmlValue 'APP_NAME'
-$outputDir = Get-YmlValue 'OUTPUT_DIR'
+on:
+  push:
+  workflow_dispatch:
 
-$csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-if (-not (Test-Path $csc)) { throw "No se encontro csc.exe de .NET Framework 4" }
+permissions:
+  contents: write
 
-New-Item -ItemType Directory -Force $outputDir | Out-Null
-$output = Join-Path $outputDir "$appName.exe"
+env:
+  APP_NAME: AppWarden
+  OUTPUT_DIR: dist
 
-& $csc /nologo /target:winexe /optimize+ /platform:anycpu "/out:$output" `
-    /win32icon:assets\app.ico /win32manifest:src\app.manifest `
-    /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll `
-    /reference:System.Windows.Forms.dll /reference:System.Xml.dll `
-    src\*.cs
-if ($LASTEXITCODE -ne 0) { throw "Error de compilacion" }
-
-Write-Host "Creado: $output"
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compilar
+        shell: powershell
+        run: .\build.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}
+          path: ${{ env.OUTPUT_DIR }}/${{ env.APP_NAME }}.exe
+      - name: Actualizar release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Última versión
+          body: Compilación automática del último commit.
+          files: ${{ env.OUTPUT_DIR }}/${{ env.APP_NAME }}.exe
