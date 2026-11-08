@@ -15,7 +15,7 @@ namespace CandadoApp
     // Avisa de versiones nuevas y, con un clic, descarga la nueva y reemplaza la vieja.
     internal static class Updater
     {
-        // Compara el commit al que apunta la etiqueta "latest" (fuente canónica) con el de esta compilación.
+        // El workflow pone el commit exacto en el cuerpo del release; solo avisa si NO coincide con el de esta build.
         public static UpdateInfo CheckForUpdate()
         {
             try
@@ -23,27 +23,21 @@ namespace CandadoApp
                 if (string.IsNullOrEmpty(BuildInfo.Repo) || string.IsNullOrEmpty(BuildInfo.Commit))
                     return null;
 
-                string refJson = Get("https://api.github.com/repos/" + BuildInfo.Repo + "/git/ref/tags/latest");
-                if (refJson == null)
+                string release = Get("https://api.github.com/repos/" + BuildInfo.Repo + "/releases/tags/latest");
+                if (release == null)
                     return null; // sin red, repo privado o sin release: no molestar
 
-                Match sha = Regex.Match(refJson, "\"sha\"\\s*:\\s*\"([0-9a-fA-F]{40})\"");
-                if (!sha.Success || sha.Groups[1].Value.Equals(BuildInfo.Commit, StringComparison.OrdinalIgnoreCase))
+                Match body = Regex.Match(release, "\"body\"\\s*:\\s*\"([^\"]*)\"");
+                string remote = body.Success ? body.Groups[1].Value.Trim() : "";
+                if (remote.Length == 0 || remote.Equals(BuildInfo.Commit, StringComparison.OrdinalIgnoreCase))
                     return null; // ya es la última versión
 
-                string release = Get("https://api.github.com/repos/" + BuildInfo.Repo + "/releases/tags/latest");
                 UpdateInfo info = new UpdateInfo();
-                if (release != null)
-                {
-                    Match asset = Regex.Match(release, "\"browser_download_url\"\\s*:\\s*\"([^\"]+\\.exe)\"");
-                    if (asset.Success)
-                        info.DownloadUrl = asset.Groups[1].Value;
-                    Match html = Regex.Match(release, "\"html_url\"\\s*:\\s*\"([^\"]+)\"");
-                    if (html.Success)
-                        info.PageUrl = html.Groups[1].Value;
-                }
-                if (info.PageUrl.Length == 0)
-                    info.PageUrl = "https://github.com/" + BuildInfo.Repo + "/releases/latest";
+                Match asset = Regex.Match(release, "\"browser_download_url\"\\s*:\\s*\"([^\"]+\\.exe)\"");
+                if (asset.Success)
+                    info.DownloadUrl = asset.Groups[1].Value;
+                Match html = Regex.Match(release, "\"html_url\"\\s*:\\s*\"([^\"]+)\"");
+                info.PageUrl = html.Success ? html.Groups[1].Value : "https://github.com/" + BuildInfo.Repo + "/releases/latest";
                 return info;
             }
             catch (WebException) { return null; }
@@ -72,7 +66,8 @@ namespace CandadoApp
                     File.Delete(oldPath);
                 File.Move(exe, oldPath);     // se puede renombrar un .exe en ejecución
                 File.Move(newPath, exe);
-                Process.Start(exe);          // arranca la versión nueva
+                // Arranca la versión nueva pidiéndole que espere a que esta cierre (para no chocar con la instancia única).
+                Process.Start(new ProcessStartInfo(exe) { Arguments = Program.UpdateRestartArgument, UseShellExecute = false });
                 return true;
             }
             catch (Exception e)

@@ -11,6 +11,7 @@ namespace CandadoApp
     {
         public const string Name = "AppWarden";
         public const string BackgroundArgument = "--background";
+        public const string UpdateRestartArgument = "--update-restart";
 
         private static Icon appIcon;
 
@@ -26,6 +27,12 @@ namespace CandadoApp
             using (Mutex mutex = new Mutex(true, Name + ".Instancia", out created))
             using (EventWaitHandle openSignal = new EventWaitHandle(false, EventResetMode.AutoReset, Name + ".Abrir"))
             {
+                if (!created && args.Contains(UpdateRestartArgument))
+                {
+                    // Reinicio por actualización: esperar a que la instancia vieja cierre y tomar su lugar.
+                    try { created = mutex.WaitOne(TimeSpan.FromSeconds(12)); }
+                    catch (AbandonedMutexException) { created = true; }
+                }
                 if (!created)
                 {
                     Native.AllowSetForegroundWindow(Native.ASFW_ANY);
@@ -35,7 +42,8 @@ namespace CandadoApp
 
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
-                Application.Run(new TrayApp(openSignal, !args.Contains(BackgroundArgument)));
+                bool openConfig = !args.Contains(BackgroundArgument) && !args.Contains(UpdateRestartArgument);
+                Application.Run(new TrayApp(openSignal, openConfig));
             }
         }
     }
