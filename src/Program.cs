@@ -49,9 +49,11 @@ namespace CandadoApp
         private readonly ContextMenuStrip menu = new ContextMenuStrip();
         private readonly ToolStripMenuItem protectionItem = new ToolStripMenuItem();
         private readonly System.Windows.Forms.Timer poll = new System.Windows.Forms.Timer { Interval = 400 };
+        private readonly System.Windows.Forms.Timer updateTimer = new System.Windows.Forms.Timer { Interval = 6 * 60 * 60 * 1000 };
         private readonly Queue<BlockedHit> queue = new Queue<BlockedHit>();
         private readonly RegisteredWaitHandle openWait;
         private LockSession lockSession;
+        private bool updateShown;
 
         public TrayApp(EventWaitHandle openSignal, bool openConfig)
         {
@@ -88,6 +90,10 @@ namespace CandadoApp
 
             poll.Tick += delegate { Scan(); };
             poll.Start();
+
+            updateTimer.Tick += delegate { CheckUpdate(); };
+            updateTimer.Start();
+            CheckUpdate();
 
             UpdateProtectionItem();
             WarnIfIncomplete();
@@ -169,6 +175,29 @@ namespace CandadoApp
                     "Abre la ventana para poner una contraseña y elegir las aplicaciones a bloquear.", ToolTipIcon.Info);
         }
 
+        // Consulta el release en segundo plano y, si hay uno más nuevo, muestra el aviso una sola vez.
+        private void CheckUpdate()
+        {
+            if (updateShown)
+                return;
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                string url = Updater.CheckForUpdate();
+                if (url == null)
+                    return;
+                try { configForm.BeginInvoke(new Action(delegate { ShowUpdate(url); })); }
+                catch { }
+            });
+        }
+
+        private void ShowUpdate(string url)
+        {
+            if (updateShown)
+                return;
+            updateShown = true;
+            new UpdateToast(url).Show();
+        }
+
         private void OpenConfig()
         {
             if (lockSession != null)
@@ -185,6 +214,7 @@ namespace CandadoApp
         private void Quit()
         {
             poll.Stop();
+            updateTimer.Stop();
             openWait.Unregister(null);
             if (lockSession != null)
                 lockSession.Dispose();

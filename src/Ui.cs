@@ -562,4 +562,79 @@ namespace CandadoApp
                 Theme.Text, TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
         }
     }
+
+    // Aviso no invasivo, abajo a la derecha, con bordes redondeados y botón "Actualizar".
+    internal sealed class UpdateToast : Form
+    {
+        private readonly string url;
+
+        public UpdateToast(string url)
+        {
+            this.url = url;
+            FormBorderStyle = FormBorderStyle.None;
+            ShowInTaskbar = false;
+            TopMost = true;
+            StartPosition = FormStartPosition.Manual;
+            BackColor = Theme.Card;
+            ForeColor = Theme.Text;
+            DoubleBuffered = true;
+            Font = Theme.UiFont(10);
+            ClientSize = new Size(360, 120);
+
+            Rectangle area = Screen.PrimaryScreen.WorkingArea;
+            Location = new Point(area.Right - Width - 18, area.Bottom - Height - 18);
+
+            IconButton close = new IconButton("", 8f) { Fill = Theme.Card, Bounds = new Rectangle(Width - 36, 8, 26, 24) };
+            close.Click += delegate { Close(); };
+            Controls.Add(close);
+
+            RoundButton update = new RoundButton { Text = "Actualizar", Font = Theme.UiFont(10, FontStyle.Bold), Bounds = new Rectangle(66, 74, 150, 34) };
+            update.Click += delegate
+            {
+                try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(this.url) { UseShellExecute = true }); }
+                catch { }
+                Close();
+            };
+            Controls.Add(update);
+        }
+
+        protected override bool ShowWithoutActivation
+        {
+            get { return true; }
+        }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                cp.ExStyle |= 0x08000000 /* WS_EX_NOACTIVATE */ | 0x00000080 /* WS_EX_TOOLWINDOW */ | 0x00000008 /* WS_EX_TOPMOST */;
+                return cp;
+            }
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            Theme.RoundWindow(this, true);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Theme.Prepare(e.Graphics);
+            Theme.FillRound(e.Graphics, Theme.Card, ClientRectangle, 16);
+            using (GraphicsPath border = Theme.Round(new RectangleF(0.75f, 0.75f, Width - 1.5f, Height - 1.5f), 16))
+            using (Pen pen = new Pen(Theme.Line))
+                e.Graphics.DrawPath(pen, border);
+
+            e.Graphics.DrawIcon(Program.AppIcon, new Rectangle(18, 20, 36, 36));
+            using (Font title = Theme.UiFont(11.5f, FontStyle.Bold))
+            using (SolidBrush text = new SolidBrush(Theme.Text))
+            using (SolidBrush muted = new SolidBrush(Theme.Muted))
+            {
+                e.Graphics.DrawString("Actualización disponible", title, text, 64, 18);
+                e.Graphics.DrawString("Hay una nueva versión de " + Program.Name + ".", Font, muted, 66, 46);
+            }
+        }
+    }
 }

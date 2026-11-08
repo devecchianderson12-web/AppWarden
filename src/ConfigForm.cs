@@ -288,7 +288,7 @@ namespace CandadoApp
             rowY += RowHeight + 10;
             RoundInput pin = PasswordInput();
             pin.Box.MaxLength = 12;
-            Row("PIN (opcional, mín. 4 dígitos)", pin);
+            Row("PIN (opcional)", pin);
 
             RoundButton savePin = new RoundButton { Text = "Guardar PIN", Font = Theme.UiFont(10, FontStyle.Bold), Bounds = new Rectangle(FieldLeft, rowY, 190, 42) };
             Label pinStatus = new Label
@@ -297,7 +297,7 @@ namespace CandadoApp
                 BackColor = Color.Transparent,
                 TextAlign = ContentAlignment.MiddleLeft,
                 Bounds = new Rectangle(FieldLeft + 204, rowY, FieldWidth - 204, 42),
-                Text = settings.HasPin ? "PIN definido." : "Sin PIN."
+                Text = settings.HasPin ? "PIN definido." : "Sin PIN (mín. 4 dígitos)."
             };
             savePin.Click += delegate
             {
